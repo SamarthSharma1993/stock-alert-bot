@@ -10,8 +10,7 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 def send_msg(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    res = requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-    print(res.json())
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
 # ================= CONFIG =================
 TICKERS = ["META", "AMZN", "AAPL", "MSFT", "GOOGL", "NVDA", "NFLX", "MELI", "QQQ"]
@@ -19,6 +18,21 @@ API_KEY = os.environ["TIINGO_API_KEY"]
 
 END_DATE = datetime.today().date()
 START_DATE = END_DATE - timedelta(days=3*365)
+
+# ================= FUNDAMENTAL SCORE =================
+FUNDAMENTAL_SCORE = {
+    "NVDA": 9,
+    "MSFT": 9,
+    "META": 9,
+    "AMZN": 8,
+    "GOOGL": 8,
+    "MELI": 8,
+    "AAPL": 6,
+    "NFLX": 6,
+    "QQQ": 8
+}
+
+AI_LEADERS = ["NVDA", "MSFT", "AMZN", "META"]
 
 # ================= RSI =================
 def compute_rsi(series, period=14):
@@ -47,50 +61,65 @@ def fetch_data(ticker):
 
     return df
 
-# ================= CLASSIFY =================
-def classify_stock(df):
+# ================= SIGNAL ENGINE =================
+def generate_signal(df, ticker):
     df["50DMA"] = df["close"].rolling(50).mean()
     df["200DMA"] = df["close"].rolling(200).mean()
+    df["RSI"] = compute_rsi(df["close"])
+    df["RET_20"] = df["close"].pct_change(20)
 
     df = df.dropna()
-
-    trend_ratio = (df["close"] > df["200DMA"]).mean()
-    dip_freq = (df["close"] < df["50DMA"]).mean()
-    volatility = df["close"].pct_change().std()
-
-    if trend_ratio > 0.7 and dip_freq < 0.2:
-        return "TREND"
-    elif volatility > 0.025:
-        return "VOLATILE"
-    else:
-        return "HYBRID"
-
-# ================= SIGNAL =================
-def generate_signal(df, stock_type):
     latest = df.iloc[-1]
 
     price = latest["close"]
     dma50 = latest["50DMA"]
     dma200 = latest["200DMA"]
     rsi = latest["RSI"]
+    ret20 = latest["RET_20"]
 
-    if stock_type == "TREND":
-        if price < dma200 and dma50 > dma200:
-            return "🔥 STRONG BUY (Trend Dip)"
-        elif price < dma50:
-            return "🟢 ADD (Pullback)"
-        else:
-            return "HOLD"
+    fundamental = FUNDAMENTAL_SCORE.get(ticker, 5)
 
-    # HYBRID + VOLATILE
-    if price < dma200 and rsi < 40:
-        return "🔥 STRONG BUY (Deep Value)"
-    elif price < dma50 and price > dma200 and 35 < rsi < 55:
-        return "🟡 BUY (Pullback)"
-    elif price > dma50 and dma50 > dma200 and 50 < rsi < 70:
-        return "🟢 BUY (Momentum)"
-    else:
-        return "HOLD"
+    # ================= TREND DETECTION =================
+    strong_trend = price > dma50 > dma200
+    weak_trend = price < dma200
+
+    # ================= MOMENTUM =================
+    strong_momentum = ret20 > 0.08  # 8% in 20 days
+    mild_momentum = ret20 > 0.03
+
+    # ================= SIGNAL LOGIC =================
+
+    # 🚀 STRONG BUY
+    if (
+        strong_trend and
+        strong_momentum and
+        rsi > 55 and
+        fundamental >= 8
+    ):
+        return "🔥 STRONG BUY"
+
+    # 🟢 BUY (Pullback in uptrend)
+    if (
+        price < dma50 and price > dma200 and
+        40 < rsi < 60 and
+        fundamental >= 7
+    ):
+        return "🟢 BUY"
+
+    # 🟢 BUY (AI leader accumulation)
+    if (
+        ticker in AI_LEADERS and
+        strong_trend and
+        rsi > 50
+    ):
+        return "🟢 BUY"
+
+    # ⚠️ AVOID (downtrend + weak fundamentals)
+    if weak_trend and fundamental <= 6:
+        return "⚠️ AVOID"
+
+    # Default
+    return "HOLD"
 
 # ================= RUN =================
 messages = []
@@ -98,23 +127,15 @@ messages = []
 for ticker in TICKERS:
     try:
         df = fetch_data(ticker)
-
-        df["50DMA"] = df["close"].rolling(50).mean()
-        df["200DMA"] = df["close"].rolling(200).mean()
-        df["RSI"] = compute_rsi(df["close"])
-
-        df = df.dropna()
-
-        stock_type = classify_stock(df)
-        signal = generate_signal(df, stock_type)
+        signal = generate_signal(df, ticker)
         price = round(df.iloc[-1]["close"], 2)
 
-        messages.append(f"{ticker} ({stock_type}) → {signal} | ${price}")
+        messages.append(f"{ticker} → {signal} | ${price}")
 
     except Exception as e:
         messages.append(f"{ticker} → ERROR: {str(e)}")
 
 # ================= FINAL MESSAGE =================
-final_msg = "📊 Daily Stock Signals\n\n" + "\n".join(messages)
+final_msg = "📊 Smart Stock Signals\n\n" + "\n".join(messages)
 
 send_msg(final_msg)
