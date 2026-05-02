@@ -13,7 +13,8 @@ def send_msg(msg):
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
 # ================= CONFIG =================
-TICKERS = ["META", "AMZN", "AAPL", "MSFT", "GOOGL", "NVDA", "NFLX", "MELI", "QQQ"]
+TICKERS = ["NVDA", "MSFT", "GOOGL", "AMZN", "META", "TSM", "AVGO"]
+
 API_KEY = os.environ["TIINGO_API_KEY"]
 
 END_DATE = datetime.today().date()
@@ -26,13 +27,9 @@ FUNDAMENTAL_SCORE = {
     "META": 9,
     "AMZN": 8,
     "GOOGL": 8,
-    "MELI": 8,
-    "AAPL": 6,
-    "NFLX": 6,
-    "QQQ": 8
+    "TSM": 9,
+    "AVGO": 9
 }
-
-AI_LEADERS = ["NVDA", "MSFT", "AMZN", "META"]
 
 # ================= RSI =================
 def compute_rsi(series, period=14):
@@ -61,65 +58,59 @@ def fetch_data(ticker):
 
     return df
 
-# ================= SIGNAL ENGINE =================
+# ================= ALLOCATION ENGINE =================
 def generate_signal(df, ticker):
-    df["50DMA"] = df["close"].rolling(50).mean()
+
     df["200DMA"] = df["close"].rolling(200).mean()
     df["RSI"] = compute_rsi(df["close"])
-    df["RET_20"] = df["close"].pct_change(20)
 
     df = df.dropna()
     latest = df.iloc[-1]
 
     price = latest["close"]
-    dma50 = latest["50DMA"]
     dma200 = latest["200DMA"]
     rsi = latest["RSI"]
-    ret20 = latest["RET_20"]
 
     fundamental = FUNDAMENTAL_SCORE.get(ticker, 5)
 
-    # ================= TREND DETECTION =================
-    strong_trend = price > dma50 > dma200
-    weak_trend = price < dma200
+    # Distance from 200DMA
+    dist = (price - dma200) / dma200
 
-    # ================= MOMENTUM =================
-    strong_momentum = ret20 > 0.08  # 8% in 20 days
-    mild_momentum = ret20 > 0.03
+    # ================= SCORE =================
+    score = 0
 
-    # ================= SIGNAL LOGIC =================
+    if dist < -0.15:
+        score += 5
+    elif dist < -0.08:
+        score += 3
+    elif dist < -0.03:
+        score += 2
+    else:
+        score += 1
 
-    # 🚀 STRONG BUY
-    if (
-        strong_trend and
-        strong_momentum and
-        rsi > 55 and
-        fundamental >= 8
-    ):
-        return "🔥 STRONG BUY"
+    if rsi < 35:
+        score += 3
+    elif rsi < 45:
+        score += 2
 
-    # 🟢 BUY (Pullback in uptrend)
-    if (
-        price < dma50 and price > dma200 and
-        40 < rsi < 60 and
-        fundamental >= 7
-    ):
-        return "🟢 BUY"
+    score *= (fundamental / 10)
 
-    # 🟢 BUY (AI leader accumulation)
-    if (
-        ticker in AI_LEADERS and
-        strong_trend and
-        rsi > 50
-    ):
-        return "🟢 BUY"
+    # Normalize to %
+    allocation = min(round(score / 8 * 100), 100)
 
-    # ⚠️ AVOID (downtrend + weak fundamentals)
-    if weak_trend and fundamental <= 6:
-        return "⚠️ AVOID"
+    # ================= LABEL =================
+    if allocation >= 70:
+        label = "🔥 STRONG BUY"
+    elif allocation >= 50:
+        label = "🟢 BUY"
+    elif allocation >= 20:
+        label = "🟡 ACCUMULATE"
+    elif allocation > 0:
+        label = "HOLD"
+    else:
+        label = "❌ SKIP"
 
-    # Default
-    return "HOLD"
+    return label, allocation, round(price, 2), round(dist * 100, 2)
 
 # ================= RUN =================
 messages = []
@@ -127,15 +118,17 @@ messages = []
 for ticker in TICKERS:
     try:
         df = fetch_data(ticker)
-        signal = generate_signal(df, ticker)
-        price = round(df.iloc[-1]["close"], 2)
+        label, allocation, price, dist = generate_signal(df, ticker)
 
-        messages.append(f"{ticker} → {signal} | ${price}")
+        messages.append(
+            f"{ticker} → {label} ({allocation}%)\n"
+            f"Price: ${price} | vs 200DMA: {dist}%\n"
+        )
 
     except Exception as e:
         messages.append(f"{ticker} → ERROR: {str(e)}")
 
 # ================= FINAL MESSAGE =================
-final_msg = "📊 Smart Stock Signals\n\n" + "\n".join(messages)
+final_msg = "📊 Smart Allocation Signals\n\n" + "\n".join(messages)
 
 send_msg(final_msg)
