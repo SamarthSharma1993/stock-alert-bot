@@ -13,7 +13,24 @@ def send_msg(msg):
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
 # ================= CONFIG =================
-TICKERS = ["NVDA", "MSFT", "GOOGL", "AMZN", "META", "TSM", "AVGO"]
+TICKERS = [
+    "NVDA",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "TSM",
+    "AVGO",
+
+    "PLTR",
+    "NOW",
+    "NVO",
+    "MELI",
+    "AMD",
+    "CRWD",
+    "MU",
+    "NBIS"
+]
 
 API_KEY = os.environ["TIINGO_API_KEY"]
 
@@ -22,13 +39,43 @@ START_DATE = END_DATE - timedelta(days=3*365)
 
 # ================= FUNDAMENTAL SCORE =================
 FUNDAMENTAL_SCORE = {
-    "NVDA": 9,
-    "MSFT": 9,
+    "NVDA": 10,
+    "MSFT": 10,
     "META": 9,
-    "AMZN": 8,
-    "GOOGL": 8,
-    "TSM": 9,
-    "AVGO": 9
+    "AMZN": 9,
+    "GOOGL": 9,
+    "TSM": 10,
+    "AVGO": 10,
+
+    # New additions
+    "PLTR": 9,
+    "NOW": 9,
+    "NVO": 8,
+    "MELI": 9,
+    "AMD": 9,
+    "CRWD": 9,
+    "MU": 8,
+    "NBIS": 7
+}
+
+# ================= VALUATION PENALTY =================
+VALUATION_PENALTY = {
+    "NVDA": 0.95,
+    "MSFT": 1.00,
+    "GOOGL": 1.10,
+    "AMZN": 1.00,
+    "META": 1.05,
+    "TSM": 1.05,
+    "AVGO": 0.95,
+
+    "PLTR": 0.75,
+    "NOW": 0.90,
+    "NVO": 1.10,
+    "MELI": 1.00,
+    "AMD": 0.95,
+    "CRWD": 0.85,
+    "MU": 1.10,
+    "NBIS": 0.80
 }
 
 # ================= RSI =================
@@ -94,6 +141,7 @@ def generate_signal(df, ticker):
         score += 2
 
     score *= (fundamental / 10)
+    score *= VALUATION_PENALTY[ticker]
 
     # Normalize to %
     allocation = min(round(score / 8 * 100), 100)
